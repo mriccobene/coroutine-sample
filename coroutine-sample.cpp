@@ -7,7 +7,7 @@
 #include <thread>
 #include <future>
 #include <stack>
-#include "thread_safe_stack.h"
+#include "thread_safe_queue.h"
 #include <assert.h>
 
 using namespace std::chrono;
@@ -28,19 +28,15 @@ public:
 	void run_loop() {
 		while (1) {
 			co_address addr;
-			queue_.wait_and_top(addr);
+			queue_.wait_and_pop(addr);
 			co_handle_base h = co_handle_base::from_address(addr);
      		h.resume();	// fa andare avanti la coroutine
-			if (h.done()) {	
-				co_address addr2;
-				queue_.try_pop(addr2);
-				assert(addr == addr2);
-				//h.destroy(); causa access violation
-			}
+			// if (h.done()) h.destroy(); giusto farlo qui?
 		}
 	}
+
 private:
-	thread_safe_stack<co_address> queue_;
+	thread_safe_queue<co_address> queue_;
 };
 
 co_scheduler co_scheduler::instance;
@@ -61,18 +57,32 @@ struct task {
 	using co_handle = std::coroutine_handle<promise_type>;
 
 	struct promise_type {
-		auto get_return_object() { return task{ co_handle::from_promise(*this) }; } // costruisce oggetto ritornato da coroutine
+
+		task<T> get_return_object() { return task{ co_handle::from_promise(*this) }; } // costruisce oggetto ritornato da coroutine
+		
 		auto initial_suspend() { return std::suspend_always{}; }
-		auto final_suspend() noexcept { return std::suspend_always{}; }
+		auto final_suspend() noexcept { 
+			struct Awaiter {
+				promise_type* self;
+				bool await_ready() { return false; }
+				void await_suspend(std::coroutine_handle<>) { if (self->caller_co_handle_) self->caller_co_handle_.resume(); }	// resume caller
+				void await_resume() {}
+			};
+			return Awaiter{ this };
+		}
+
 		void return_value(T&& value) noexcept(std::is_nothrow_constructible_v<T, T&&>) { value_ = std::forward<T>(value); }
 		void unhandled_exception() noexcept { exception_ = std::current_exception(); }
+		
 		T result() { if (exception_) std::rethrow_exception(exception_); else return value_; }
         // T result()&& { if (exception_) std::rethrow_exception(exception_) else return std::move(value_); }
 
-		promise_type(): value_{}, exception_{} {}
+		promise_type() : value_{}, exception_{}, caller_co_handle_{} {}
 
 		T value_; // requires: default ctor & copy ctor
 		std::exception_ptr exception_; 
+		std::coroutine_handle<> caller_co_handle_;
+
 		// improvement: use union of T and exception_ptr, construct value_ and exception_ in place with
 		// ::new (static_cast<void*>(std::addressof(value_))) T(std::forward<VALUE>(value));
 		// ::new (static_cast<void*>(std::addressof(exception_))) std::exception_ptr(std::current_exception());
@@ -84,9 +94,11 @@ struct task {
 		return !co_handle_ || co_handle_.done(); 
 	}
 
-	void await_suspend(std::coroutine_handle<> h) noexcept
+	void await_suspend(std::coroutine_handle<> caller_co_handle) noexcept
 	{
-		co_scheduler::instance.add(co_handle_);  // Nota: se passo h non funziona, in effetti h != co_handle_
+		co_handle_.promise().caller_co_handle_ = caller_co_handle;
+		co_handle_.resume();
+		//co_scheduler::instance.add(co_handle_);  // Nota: se passo h non funziona, in effetti h != co_handle_
 	}
 
 	decltype(auto) await_resume() 
@@ -137,6 +149,9 @@ struct task {
 
 #endif
 
+	T exec_sync() { if (!co_handle_.done()) co_handle_.resume(); return this->co_handle_.promise().result(); }
+	void exec_async() { if (!co_handle_.done()) co_scheduler::instance.add(co_handle_); }
+
 	explicit task(co_handle h) noexcept: co_handle_(h) {}
 	task(task&& t) noexcept:             co_handle_(std::exchange(t.co_handle_, {})) {}
 	~task()                              { if (co_handle_) co_handle_.destroy();	}
@@ -150,28 +165,37 @@ struct task<void> {
 	using co_handle = std::coroutine_handle<promise_type>;
 
 	struct promise_type {
-		auto get_return_object() { return task{ co_handle::from_promise(*this) }; } // costruisce oggetto ritornato da coroutine
+		task<void> get_return_object() { return task{ co_handle::from_promise(*this) }; } // costruisce oggetto ritornato da coroutine
 		auto initial_suspend() { return std::suspend_always{}; }
-		auto final_suspend() noexcept { return std::suspend_always{}; }
+		auto final_suspend() noexcept { 
+			struct Awaiter {
+				promise_type* self;
+				bool await_ready() { return false; }
+				void await_suspend(std::coroutine_handle<>) { if (self->caller_co_handle_) self->caller_co_handle_.resume(); }	// resume caller
+				void await_resume() {}
+			};
+			return Awaiter{ this };
+		}
 		void return_void() noexcept {}
 		void unhandled_exception() noexcept { exception_ = std::current_exception(); }
 		void result() { if (exception_) std::rethrow_exception(exception_); }
 		
-		std::exception_ptr exception_;
-	};
+		promise_type() : exception_{}, caller_co_handle_{} {}
 
-	// ???
-	//bool move_next() { if (co_handle_.done()) return false; else { co_handle_.resume(); return true; } }
-	void go() { if (!co_handle_.done()) await_suspend(co_handle_); }
+		std::exception_ptr exception_;
+		std::coroutine_handle<> caller_co_handle_;
+	};
 
 	bool await_ready() noexcept
 	{
 		return !co_handle_ || co_handle_.done();
 	}
 
-	void await_suspend(std::coroutine_handle<> h) noexcept
+	void await_suspend(std::coroutine_handle<> caller_co_handle) noexcept
 	{
-		co_scheduler::instance.add(co_handle_); // Nota: con h non funziona
+		co_handle_.promise().caller_co_handle_ = caller_co_handle;
+		co_handle_.resume();
+		//co_scheduler::instance.add(co_handle_); // Nota: con h non funziona
 	}
 
 	decltype(auto) await_resume()
@@ -179,6 +203,10 @@ struct task<void> {
 		if (!this->co_handle_) throw broken_promise{};
 		return this->co_handle_.promise().result();
 	}
+
+
+	void exec_sync() { if (!co_handle_.done()) co_handle_.resume(); }
+	void exec_async() { if (!co_handle_.done()) co_scheduler::instance.add(co_handle_); }
 
 	explicit task(co_handle h) noexcept : co_handle_(h) {}
 	task(task&& t) noexcept : co_handle_(std::exchange(t.co_handle_, {})) {}
@@ -207,12 +235,11 @@ auto operator co_await(std::chrono::duration<Rep, Period> dur)
 			// tod: implementare con co_scheduler aggiungendo il tempo			
 			std::thread([=]() {
 				std::this_thread::sleep_until(resume_time); // sleep
-				//co_handle.resume();  // resume & destructs the obj, which has been std::move()'d
 				std::cout << "timer scaduto\n";
-				co_scheduler::instance.add(co_handle);
+				co_scheduler::instance.add(co_handle);  // predispone continuazione su thread dello scheduler
+				//co_handle.resume();  // facendo resume qui si esegue la continuazione in questo thread
 			}).detach();     // detach scares me
 
-			
 		}
 		void await_resume() {}
 	};
@@ -223,7 +250,7 @@ auto operator co_await(std::chrono::duration<Rep, Period> dur)
 task<int> h()
 {
 	std::cout << "h - started\n";
-	co_await 10ms;
+	co_await 1000ms;
 	std::cout << "h - resumed\n";
 	co_return 1;
 }
@@ -260,13 +287,16 @@ int main()
 {
 	std::cout << "Hello coroutine!\n";
 
-	auto co = sample();
+	auto co1 = sample();
 	auto co2 = sample2();
 	
-	//co_scheduler::instance.add(co.co_handle_);	
-	co_scheduler::instance.add(co2.co_handle_);
+	//co2.exec_sync();
+
+	co1.exec_async();
+	co2.exec_async();
 	co_scheduler::instance.run_loop();
 
+	// ---------------------------------------------------------------------------------------
 	// su cppcoro si fa cosi':
 	// cppcoro::sync_wait(sample()); 
 	// oppure cosi':
