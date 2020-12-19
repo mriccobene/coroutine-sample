@@ -1,4 +1,5 @@
 // Da una implementazione di Anthony Williams (http://www.justsoftwaresolutions.co.uk/2008/09/)
+// todo: rivedere secondo: https://github.com/anthonywilliams/ccia_code_samples/blob/main/listings/listing_6.2.cpp
 
 // concurrent_queue e' come std::queue un adattatore per contenitori di tipo Sequence
 // quindi e' possibile istanziare concurrent_queue con std::deque, std::list ecc.

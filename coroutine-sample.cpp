@@ -10,6 +10,8 @@
 #include "thread_safe_queue.h"
 #include <assert.h>
 
+#include <type_traits>
+
 using namespace std::chrono;
 
 // ----------------------------------------------------------------------------------------------------------------
@@ -50,43 +52,34 @@ public:
 };
 
 // ----------------------------------------------------------------------------------------------------------------
+struct promise_type_base {
+
+	auto initial_suspend() { return std::suspend_always{}; }
+	auto final_suspend() noexcept {
+		struct Awaiter {
+			promise_type_base* self;
+			bool await_ready() { return false; }
+			void await_suspend(std::coroutine_handle<>) { if (self->caller_co_handle_) self->caller_co_handle_.resume(); }	// resume caller
+			void await_resume() {}
+		};
+		return Awaiter{ this };
+	}
+
+	void unhandled_exception() noexcept { exception_ = std::current_exception(); }
+
+	promise_type_base() : exception_{}, caller_co_handle_{} {}
+
+	std::exception_ptr exception_;
+	std::coroutine_handle<> caller_co_handle_;
+};
+
+template <typename T>
+struct promise_type;
 
 template <typename T>
 struct task {
-	struct promise_type;
+	using promise_type = promise_type<T>;
 	using co_handle = std::coroutine_handle<promise_type>;
-
-	struct promise_type {
-
-		task<T> get_return_object() { return task{ co_handle::from_promise(*this) }; } // costruisce oggetto ritornato da coroutine
-		
-		auto initial_suspend() { return std::suspend_always{}; }
-		auto final_suspend() noexcept { 
-			struct Awaiter {
-				promise_type* self;
-				bool await_ready() { return false; }
-				void await_suspend(std::coroutine_handle<>) { if (self->caller_co_handle_) self->caller_co_handle_.resume(); }	// resume caller
-				void await_resume() {}
-			};
-			return Awaiter{ this };
-		}
-
-		void return_value(T&& value) noexcept(std::is_nothrow_constructible_v<T, T&&>) { value_ = std::forward<T>(value); }
-		void unhandled_exception() noexcept { exception_ = std::current_exception(); }
-		
-		T result() { if (exception_) std::rethrow_exception(exception_); else return value_; }
-        // T result()&& { if (exception_) std::rethrow_exception(exception_) else return std::move(value_); }
-
-		promise_type() : value_{}, exception_{}, caller_co_handle_{} {}
-
-		T value_; // requires: default ctor & copy ctor
-		std::exception_ptr exception_; 
-		std::coroutine_handle<> caller_co_handle_;
-
-		// improvement: use union of T and exception_ptr, construct value_ and exception_ in place with
-		// ::new (static_cast<void*>(std::addressof(value_))) T(std::forward<VALUE>(value));
-		// ::new (static_cast<void*>(std::addressof(exception_))) std::exception_ptr(std::current_exception());
-	};
 
 #if !defined(CO_AWAIT_OVERLOADING)
 	bool await_ready() noexcept 
@@ -159,61 +152,44 @@ struct task {
 	co_handle co_handle_;
 };
 
-template <>
-struct task<void> {
-	struct promise_type;
+
+template <typename T>
+struct promise_type : public promise_type_base {
 	using co_handle = std::coroutine_handle<promise_type>;
 
-	struct promise_type {
-		task<void> get_return_object() { return task{ co_handle::from_promise(*this) }; } // costruisce oggetto ritornato da coroutine
-		auto initial_suspend() { return std::suspend_always{}; }
-		auto final_suspend() noexcept { 
-			struct Awaiter {
-				promise_type* self;
-				bool await_ready() { return false; }
-				void await_suspend(std::coroutine_handle<>) { if (self->caller_co_handle_) self->caller_co_handle_.resume(); }	// resume caller
-				void await_resume() {}
-			};
-			return Awaiter{ this };
-		}
-		void return_void() noexcept {}
-		void unhandled_exception() noexcept { exception_ = std::current_exception(); }
-		void result() { if (exception_) std::rethrow_exception(exception_); }
-		
-		promise_type() : exception_{}, caller_co_handle_{} {}
+	task<T> get_return_object() { return task{ co_handle::from_promise(*this) }; } // costruisce oggetto ritornato da coroutine
 
-		std::exception_ptr exception_;
-		std::coroutine_handle<> caller_co_handle_;
-	};
+	void return_value(T&& value) noexcept(std::is_nothrow_constructible_v<T, T&&>) { value_ = std::forward<T>(value); }
 
-	bool await_ready() noexcept
-	{
-		return !co_handle_ || co_handle_.done();
-	}
+	T result() { if (exception_) std::rethrow_exception(exception_); else return value_; }
+	// T result()&& { if (exception_) std::rethrow_exception(exception_) else return std::move(value_); }
 
-	void await_suspend(std::coroutine_handle<> caller_co_handle) noexcept
-	{
-		co_handle_.promise().caller_co_handle_ = caller_co_handle;
-		co_handle_.resume();
-		//co_scheduler::instance.add(co_handle_); // Nota: con h non funziona
-	}
+	promise_type() : promise_type_base{}, value_{} {}
 
-	decltype(auto) await_resume()
-	{
-		if (!this->co_handle_) throw broken_promise{};
-		return this->co_handle_.promise().result();
-	}
+	T value_; // requires: default ctor & copy ctor
 
-
-	void exec_sync() { if (!co_handle_.done()) co_handle_.resume(); }
-	void exec_async() { if (!co_handle_.done()) co_scheduler::instance.add(co_handle_); }
-
-	explicit task(co_handle h) noexcept : co_handle_(h) {}
-	task(task&& t) noexcept : co_handle_(std::exchange(t.co_handle_, {})) {}
-	~task() { if (co_handle_) co_handle_.destroy(); }
-
-	co_handle co_handle_;
+	// improvement: use union of T and exception_ptr, construct value_ and exception_ in place with
+	// ::new (static_cast<void*>(std::addressof(value_))) T(std::forward<VALUE>(value));
+	// ::new (static_cast<void*>(std::addressof(exception_))) std::exception_ptr(std::current_exception());
 };
+
+template <>
+struct promise_type<void> : public promise_type_base {
+	using co_handle = std::coroutine_handle<promise_type>;
+
+	task<void> get_return_object() { return task{ co_handle::from_promise(*this) }; } // costruisce oggetto ritornato da coroutine
+
+	void return_void() noexcept {}
+
+	void result() { if (exception_) std::rethrow_exception(exception_); }
+
+	promise_type() : promise_type_base{} {}
+};
+
+//template <typename T>
+//task<T> promise_type<T>::get_return_object() { return task{ co_handle::from_promise(*this) }; } // costruisce oggetto ritornato da coroutine
+
+// task<void> promise_type<void>::get_return_object() { return task{ co_handle::from_promise(*this) }; } // costruisce oggetto ritornato da coroutine
 
 // ----------------------------------------------------------------------------------------------------------------
 // da https://stackoverflow.com/questions/49640336/implementing-example-from-coroutines-ts-2017
