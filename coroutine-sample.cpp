@@ -59,7 +59,7 @@ template <typename T>
 struct promise_type;
 
 template <typename T>
-struct task {
+struct co_task {
 	using promise_type = promise_type<T>;
 	using co_handle = std::coroutine_handle<promise_type>;	// we can use a trait to define this
 
@@ -127,9 +127,9 @@ struct task {
 	T exec_sync() { if (!co_handle_.done()) co_handle_.resume(); return this->co_handle_.promise().result(); }
 	void exec_async() { if (!co_handle_.done()) co_scheduler::instance.add(co_handle_); }
 
-	explicit task(co_handle h) noexcept: co_handle_(h) {}
-	task(task&& t) noexcept:             co_handle_(std::exchange(t.co_handle_, {})) {}
-	~task()                              { if (co_handle_) co_handle_.destroy();	}
+	explicit co_task(co_handle h) noexcept: co_handle_(h) {}
+	co_task(co_task&& t) noexcept:             co_handle_(std::exchange(t.co_handle_, {})) {}
+	~co_task()                              { if (co_handle_) co_handle_.destroy();	}
 
 	co_handle co_handle_;
 };
@@ -162,7 +162,7 @@ template <typename T>
 struct promise_type : public promise_type_base {
 	using co_handle = std::coroutine_handle<promise_type>;
 
-	task<T> get_return_object() { return task{ co_handle::from_promise(*this) }; } // costruisce oggetto ritornato da coroutine
+	co_task<T> get_return_object() { return co_task{ co_handle::from_promise(*this) }; } // costruisce oggetto ritornato da coroutine
 
 	void return_value(T&& value) noexcept(std::is_nothrow_constructible_v<T, T&&>) { value_ = std::forward<T>(value); }
 
@@ -182,7 +182,7 @@ template <>
 struct promise_type<void> : public promise_type_base {
 	using co_handle = std::coroutine_handle<promise_type>;
 
-	task<void> get_return_object() { return task{ co_handle::from_promise(*this) }; } // costruisce oggetto ritornato da coroutine
+	co_task<void> get_return_object() { return co_task{ co_handle::from_promise(*this) }; } // build co_routing object
 
 	void return_void() noexcept {}
 
@@ -191,10 +191,10 @@ struct promise_type<void> : public promise_type_base {
 	promise_type() : promise_type_base{} {}
 };
 
+// We can clean the code moving implementations in other files
 //template <typename T>
-//task<T> promise_type<T>::get_return_object() { return task{ co_handle::from_promise(*this) }; } // costruisce oggetto ritornato da coroutine
-
-// task<void> promise_type<void>::get_return_object() { return task{ co_handle::from_promise(*this) }; } // costruisce oggetto ritornato da coroutine
+//co_task<T> promise_type<T>::get_return_object() { return co_task{ co_handle::from_promise(*this) }; } // build co_routing object
+// co_task<void> promise_type<void>::get_return_object() { return co_task{ co_handle::from_promise(*this) }; } // build co_routing object
 
 // ----------------------------------------------------------------------------------------------------------------
 // co_await for chrono::duration
@@ -231,7 +231,10 @@ auto operator co_await(std::chrono::duration<Rep, Period> dur)
 	return awaiter{ dur };
 }
 
-task<int> h()
+// ----------------------------------------------------------------------------------------------------------------
+// example
+
+co_task<int> h()
 {
 	std::cout << "h - started\n";
 	co_await 1000ms;
@@ -239,7 +242,7 @@ task<int> h()
 	co_return 1;
 }
 
-task<void> g()
+co_task<void> g()
 {
 	std::cout << "g - started\n";
 
@@ -248,7 +251,7 @@ task<void> g()
 	std::cout << "g - resumed\n";
 }
 
-task<void> sample()
+co_task<void> sample()
 {
 	std::cout << "sample start\n";
 
@@ -257,7 +260,7 @@ task<void> sample()
 	std::cout << "sample end\n";
 }
 
-task<void> sample2()
+co_task<void> sample2()
 {
 	std::cout << "sample2 start\n";
 
@@ -265,7 +268,6 @@ task<void> sample2()
 
 	std::cout << "sample2 end\n";
 }
-
 
 int main()
 {
