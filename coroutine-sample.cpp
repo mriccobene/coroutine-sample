@@ -15,7 +15,8 @@
 using namespace std::chrono;
 
 // ----------------------------------------------------------------------------------------------------------------
-//coroutine_handle from_address
+// (toy) coroutine scheduler
+
 class co_scheduler {
 public:
 	static co_scheduler instance;
@@ -52,26 +53,7 @@ public:
 };
 
 // ----------------------------------------------------------------------------------------------------------------
-struct promise_type_base {
-
-	auto initial_suspend() { return std::suspend_always{}; }
-	auto final_suspend() noexcept {
-		struct Awaiter {
-			promise_type_base* self;
-			bool await_ready() { return false; }
-			void await_suspend(std::coroutine_handle<>) { if (self->caller_co_handle_) self->caller_co_handle_.resume(); }	// resume caller
-			void await_resume() {}
-		};
-		return Awaiter{ this };
-	}
-
-	void unhandled_exception() noexcept { exception_ = std::current_exception(); }
-
-	promise_type_base() : exception_{}, caller_co_handle_{} {}
-
-	std::exception_ptr exception_;
-	std::coroutine_handle<> caller_co_handle_;
-};
+// (toy) coroutine 
 
 template <typename T>
 struct promise_type;
@@ -79,7 +61,7 @@ struct promise_type;
 template <typename T>
 struct task {
 	using promise_type = promise_type<T>;
-	using co_handle = std::coroutine_handle<promise_type>;
+	using co_handle = std::coroutine_handle<promise_type>;	// we can use a trait to define this
 
 #if !defined(CO_AWAIT_OVERLOADING)
 	bool await_ready() noexcept 
@@ -152,6 +134,29 @@ struct task {
 	co_handle co_handle_;
 };
 
+// ----------------------------------------------------------------------------------------------------------------
+// (toy) promise_type
+
+struct promise_type_base {
+
+	auto initial_suspend() { return std::suspend_always{}; }
+	auto final_suspend() noexcept {
+		struct Awaiter {
+			promise_type_base* self;
+			bool await_ready() { return false; }
+			void await_suspend(std::coroutine_handle<>) { if (self->caller_co_handle_) self->caller_co_handle_.resume(); }	// resume caller
+			void await_resume() {}
+		};
+		return Awaiter{ this };
+	}
+
+	void unhandled_exception() noexcept { exception_ = std::current_exception(); }
+
+	promise_type_base() : exception_{}, caller_co_handle_{} {}
+
+	std::exception_ptr exception_;
+	std::coroutine_handle<> caller_co_handle_;
+};
 
 template <typename T>
 struct promise_type : public promise_type_base {
@@ -192,7 +197,10 @@ struct promise_type<void> : public promise_type_base {
 // task<void> promise_type<void>::get_return_object() { return task{ co_handle::from_promise(*this) }; } // costruisce oggetto ritornato da coroutine
 
 // ----------------------------------------------------------------------------------------------------------------
+// co_await for chrono::duration
 // da https://stackoverflow.com/questions/49640336/implementing-example-from-coroutines-ts-2017
+// 
+
 template<class Rep, class Period>
 auto operator co_await(std::chrono::duration<Rep, Period> dur)
 {
