@@ -71,9 +71,8 @@ struct co_task {
 
 	void await_suspend(std::coroutine_handle<> caller_co_handle) noexcept
 	{
-		co_handle_.promise().caller_co_handle_ = caller_co_handle;
+		co_handle_.promise().caller_co_handle_ = caller_co_handle;  // save caller coroutine handle, it will be resumed at the end of this coroutine
 		co_handle_.resume();
-		//co_scheduler::instance.add(co_handle_);  // Nota: se passo h non funziona, in effetti h != co_handle_
 	}
 
 	decltype(auto) await_resume() 
