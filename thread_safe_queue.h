@@ -1,10 +1,13 @@
-// Da una implementazione di Anthony Williams (http://www.justsoftwaresolutions.co.uk/2008/09/)
-// todo: rivedere secondo: https://github.com/anthonywilliams/ccia_code_samples/blob/main/listings/listing_6.2.cpp
+// From an implementation by Anthony Williams (http://www.justsoftwaresolutions.co.uk/2008/09/)
+// todo: revise looking at https://github.com/anthonywilliams/ccia_code_samples/blob/main/listings/listing_6.2.cpp
+// better choice: Intel TBB concurrent_queue
 
-// concurrent_queue e' come std::queue un adattatore per contenitori di tipo Sequence
-// quindi e' possibile istanziare concurrent_queue con std::deque, std::list ecc.
-// Questo adattatore a differenza di std::queue consente operazioni atomiche sulla coda
-// quindi la sua interfaccia e' diversa di conseguenza e segue un modello diffuso
+// concurrent_queue like std::queue is an adaptor of (Front Insertion+Back Insertion) Sequence containers 
+// with a FIFO interface; you can instantiate concurrent_queue with std::deque, std::list ecc.
+// Unlike std::queue, this adaptor allows atomic operations on the queue so his interface is different
+// from std::queue but follows a widespread model
+
+// WARNING: please do not use this class in production, instead prefer Intel TBB concurrent_queue
 
 #ifndef THREAD_SAFE_QUEUE_H
 #define THREAD_SAFE_QUEUE_H

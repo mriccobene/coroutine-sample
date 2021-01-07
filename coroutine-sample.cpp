@@ -1,5 +1,6 @@
-// coroutine-sample.cpp 
-//
+// This is a toy program to explore the c++20 coroutine feature
+// and it has educational only purposes
+// Author: Michelangelo Riccobene - 7 gen 2021
 
 #include <iostream>
 #include <chrono>
@@ -33,8 +34,8 @@ public:
 			co_address addr;
 			queue_.wait_and_pop(addr);
 			co_handle_base h = co_handle_base::from_address(addr);
-     		h.resume();	// fa andare avanti la coroutine
-			// if (h.done()) h.destroy(); giusto farlo qui?
+     		h.resume();	// pushes the coroutine forward
+			// if (h.done()) h.destroy(); ???
 		}
 	}
 
@@ -82,11 +83,11 @@ struct co_task {
 	}
 #else
 
-	// Prima forma:
+	// First form:
 	// class awaiter { /* ... */ };  
 	// awaiter operator co_await() && noexcept { return awaitable{ co_handle_ }; }
 
-	// Seconda forma:
+	// Second form:
 	auto operator co_await() const& noexcept
 	{
 		struct awaitable 
@@ -117,7 +118,7 @@ struct co_task {
 		return awaitable{ co_handle_ };
 	}
 
-	// miglioramento: definire 
+	// improvement: define 
 	// auto operator co_await() const& noexcept
 	// auto operator co_await() const&& noexcept
 
@@ -215,13 +216,13 @@ auto operator co_await(std::chrono::duration<Rep, Period> dur)
 
 		void await_suspend(std::coroutine_handle<> co_handle)
 		{
-			// tod: implementare con co_scheduler aggiungendo il tempo			
+			// this is expensive, todo: implement extending co_scheduler with a time aware queue			
 			std::thread([=]() {
 				std::this_thread::sleep_until(resume_time); // sleep
-				std::cout << "timer scaduto\n";
-				co_scheduler::instance.add(co_handle);  // predispone continuazione su thread dello scheduler
-				//co_handle.resume();  // facendo resume qui si esegue la continuazione in questo thread
-			}).detach();     // detach scares me
+				std::cout << "timer expired\n";
+				co_scheduler::instance.add(co_handle);  // set up continuation on the scheduler thread
+				//co_handle.resume();  // resuming here we run the coroutine continuation on this thread
+			}).detach(); // detach scares me
 
 		}
 		void await_resume() {}
@@ -275,26 +276,18 @@ int main()
 	auto co1 = sample();
 	auto co2 = sample2();
 	
-	//co2.exec_sync();
-
 	co1.exec_async();
 	co2.exec_async();
+
 	co_scheduler::instance.run_loop();
 
-	// ---------------------------------------------------------------------------------------
-	// su cppcoro si fa cosi':
-	// cppcoro::sync_wait(sample()); 
-	// oppure cosi':
-	// auto con = std::async([] { cppcoro::sync_wait(sample()); });  // (1)
-	// con.get();		
+	// -------------------------------------------------------------------
+	// on cppcoro we must code like this:
+	//    cppcoro::sync_wait(sample()); 
+	// or:
+	//    auto con = std::async([] { cppcoro::sync_wait(sample()); });  
+	//    con.get();		
 	
-	/*
-	// sleep
-	using clock = std::chrono::high_resolution_clock;
-	clock::time_point t(clock::now() + 1s);
-	std::this_thread::sleep_until(t); 
-	*/
-
 	std::cout << "Hello coroutine ended!\n";
 }
 

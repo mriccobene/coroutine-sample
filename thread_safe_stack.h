@@ -1,12 +1,7 @@
-// Da una implementazione di Anthony Williams (http://www.justsoftwaresolutions.co.uk/2008/09/)
+// From an implementation by Anthony Williams (http://www.justsoftwaresolutions.co.uk/2008/09/)
 
-// concurrent_queue e' come std::queue un adattatore per contenitori di tipo Sequence
-// quindi e' possibile istanziare concurrent_queue con std::deque, std::list ecc.
-// Questo adattatore a differenza di std::queue consente operazioni atomiche sulla coda
-// quindi la sua interfaccia e' diversa di conseguenza e segue un modello diffuso
-
-#ifndef THREAD_SAFE_QUEUE_H
-#define THREAD_SAFE_QUEUE_H
+#ifndef THREAD_SAFE_STACK_H
+#define THREAD_SAFE_STACK_H
 
 #include <mutex>
 #include <condition_variable>
@@ -98,4 +93,4 @@ public:
 };
 
 
-#endif //THREAD_SAFE_QUEUE_H
+#endif //THREAD_SAFE_STACK_H
