@@ -143,9 +143,9 @@ struct promise_type_base {
 	auto final_suspend() noexcept {
 		struct Awaiter {
 			promise_type_base* self;
-			bool await_ready() { return false; }
-			void await_suspend(std::coroutine_handle<>) { if (self->caller_co_handle_) self->caller_co_handle_.resume(); }	// resume caller
-			void await_resume() {}
+			bool await_ready() noexcept { return false; }
+			void await_suspend(std::coroutine_handle<>) noexcept { if (self->caller_co_handle_) self->caller_co_handle_.resume(); }	// resume caller
+			void await_resume() noexcept {}
 		};
 		return Awaiter{ this };
 	}
